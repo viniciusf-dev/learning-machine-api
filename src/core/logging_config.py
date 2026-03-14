@@ -9,7 +9,7 @@ import logging
 import sys
 from typing import Optional
 
-from config import settings
+from src.core.config import settings
 
 
 class StructuredFormatter(logging.Formatter):
@@ -27,7 +27,6 @@ class StructuredFormatter(logging.Formatter):
         
         msg = super().format(record)
 
-        
         if hasattr(record, "extra_fields"):
             extra_str = " ".join(
                 f"{k}={v!r}" for k, v in record.extra_fields.items()

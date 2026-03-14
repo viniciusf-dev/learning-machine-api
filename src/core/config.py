@@ -13,7 +13,12 @@ from pydantic import Field, field_validator
 class Settings(BaseSettings):
     """Application configuration loaded from environment variables."""
 
-    database_url: str = Field(..., description="PostgreSQL connection URL")
+    # Database configuration
+    postgres_user: str = Field(default="agno_user", description="PostgreSQL user")
+    postgres_password: str = Field(default="agno_password", description="PostgreSQL password")
+    postgres_db: str = Field(default="agno_memory", description="PostgreSQL database name")
+    postgres_port: int = Field(default=5432, description="PostgreSQL port")
+    postgres_host: str = Field(default="postgres", description="PostgreSQL host")
 
     api_host: str = Field(default="0.0.0.0", description="API bind host")
     api_port: int = Field(default=8000, ge=1, le=65535, description="API bind port")
@@ -28,7 +33,7 @@ class Settings(BaseSettings):
         description="Anthropic API key for Claude model access"
     )
     llm_model_id: str = Field(
-        default="claude-haiku-4-5",
+        default="claude-haiku-4-5-20251001",
         description="Claude model ID to use for extraction and recall"
     )
     llm_request_timeout: int = Field(
@@ -98,15 +103,10 @@ class Settings(BaseSettings):
         env_file_encoding = "utf-8"
         case_sensitive = False
 
-    @field_validator("database_url")
-    @classmethod
-    def validate_database_url(cls, v: str) -> str:
-        """Ensure database_url is not empty and looks valid."""
-        if not v or not v.strip():
-            raise ValueError("database_url cannot be empty")
-        if not v.startswith(("postgresql://", "postgres://")):
-            raise ValueError("database_url must start with postgresql:// or postgres://")
-        return v
+    @property
+    def database_url(self) -> str:
+        """Build database URL from components."""
+        return f"postgresql://{self.postgres_user}:{self.postgres_password}@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
 
     @field_validator("llm_model_id")
     @classmethod

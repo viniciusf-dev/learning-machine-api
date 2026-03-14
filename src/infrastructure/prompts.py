@@ -5,7 +5,7 @@ All LLM prompts are defined here for easy management, versioning, and A/B testin
 Prompts use Python f-strings to include dynamic variables from config or context.
 """
 
-from config import settings
+from src.core.config import settings
 
 
 class SystemPrompts:
