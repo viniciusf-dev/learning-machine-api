@@ -23,7 +23,6 @@ class ErrorCode(str, Enum):
     implementation details.
     """
 
-   
     INVALID_REQUEST = "invalid_request"
     VALIDATION_FAILED = "validation_failed"
     MESSAGE_LIMIT_EXCEEDED = "message_limit_exceeded"
@@ -32,7 +31,6 @@ class ErrorCode(str, Enum):
     INVALID_USER_ID = "invalid_user_id"
     INVALID_CHANNEL = "invalid_channel"
 
-    
     DATABASE_ERROR = "database_error"
     LEARNING_MACHINE_ERROR = "learning_machine_error"
     LLM_ERROR = "llm_error"

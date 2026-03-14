@@ -19,9 +19,9 @@ from agno.learn import (
 )
 from agno.models.anthropic import Claude
 
-from config import settings
-from schemas import CrossSessionProfile
-from prompts import get_system_prompt
+from src.core.config import settings
+from src.domain.schemas import CrossSessionProfile
+from src.infrastructure.prompts import get_system_prompt
 
 
 logger = logging.getLogger(__name__)

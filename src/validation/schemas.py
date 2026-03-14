@@ -1,8 +1,9 @@
 """
-Request and response schemas with comprehensive type safety and validation.
+API request and response schemas with comprehensive type safety and validation.
 """
 
-from config import settings
+from src.core.config import settings
+from src.domain.schemas import CrossSessionProfile, CrossSessionEntityMemory
 
 from dataclasses import dataclass, field
 from typing import Optional, List
@@ -118,7 +119,7 @@ class MessageRequest(BaseModel):
         
         This ensures runtime validation regardless of Pydantic config.
         """
-        from config import settings
+        from src.core.config import settings
 
         if len(v) > settings.max_message_length:
             raise ValueError(
