@@ -13,7 +13,6 @@ from pydantic import Field, field_validator
 class Settings(BaseSettings):
     """Application configuration loaded from environment variables."""
 
-    # Database configuration
     postgres_user: str = Field(default="agno_user", description="PostgreSQL user")
     postgres_password: str = Field(default="agno_password", description="PostgreSQL password")
     postgres_db: str = Field(default="agno_memory", description="PostgreSQL database name")

@@ -1,13 +1,5 @@
 """
 MemoryService — unified service for all memory operations.
-
-Replaces the three separate single-method classes (ConversationProcessor,
-ContextRecall, MemoryCurator) with one cohesive service. Easier to test,
-easier to inject, and no ceremony around instantiating objects just to call
-one method.
-
-All I/O-bound calls (agent.run) are wrapped in asyncio.to_thread so they
-don't block the FastAPI event loop under concurrent load.
 """
 
 import asyncio
@@ -23,8 +15,6 @@ from src.infrastructure.prompts import get_extraction_prompt, get_recall_prompt
 
 logger = logging.getLogger(__name__)
 
-# Fixed session ID for recall operations — avoids accumulating ghost sessions
-# in the database for every /recall call.
 _RECALL_SESSION_ID = "__recall__"
 
 
@@ -38,10 +28,6 @@ class MemoryService:
 
     def __init__(self, agent: Agent) -> None:
         self._agent = agent
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
 
     async def process_messages(
         self,
@@ -115,6 +101,9 @@ class MemoryService:
 
         content = self._extract_content(response)
 
+        if content and content.strip().upper() == "NO_MEMORY":
+            content = None
+
         logger.info(
             f"Recalled context for user={context.user_id}, length={len(content or '')} chars"
         )
@@ -152,10 +141,6 @@ class MemoryService:
         except Exception as e:
             logger.error(f"Failed to clear memory for user={user_id}: {e}", exc_info=True)
             raise ServiceError(f"Failed to clear memory: {e}") from e
-
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _extract_content(response) -> Optional[str]:

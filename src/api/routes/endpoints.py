@@ -24,7 +24,7 @@ from src.services.memory_service import MemoryService
 
 logger = logging.getLogger(__name__)
 
-_REQUEST_TIMEOUT = 120  # seconds — hard cap per request to prevent hung workers
+_REQUEST_TIMEOUT = 120
 
 
 async def health() -> HealthResponse:
@@ -108,7 +108,7 @@ async def clear_memory(user_id: str, request: Request) -> ClearMemoryResponse:
     Returns:
         ClearMemoryResponse confirming the operation
     """
-    # Validate user_id explicitly — it arrives as a raw path param, not via Pydantic
+    
     SessionContext._validate_user_id(user_id)
 
     agent = get_agent(request)

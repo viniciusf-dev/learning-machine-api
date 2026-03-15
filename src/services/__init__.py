@@ -1,19 +1,10 @@
 """
 Business logic services for the memory bridge API.
 
-MemoryService is the primary entry point. The individual classes
-(ConversationProcessor, ContextRecall, MemoryCurator) are kept for
-backward compatibility but MemoryService is preferred.
+MemoryService is the single entry point for all memory operations
+(process, recall, clear).
 """
 
 from .memory_service import MemoryService
-from .conversation import ConversationProcessor
-from .recall import ContextRecall
-from .curator import MemoryCurator
 
-__all__ = [
-    "MemoryService",
-    "ConversationProcessor",
-    "ContextRecall",
-    "MemoryCurator",
-]
+__all__ = ["MemoryService"]

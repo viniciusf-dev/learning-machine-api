@@ -24,14 +24,12 @@ logger = logging.getLogger(__name__)
 class ErrorCode(str, Enum):
     """Machine-readable error codes for client-side handling."""
 
-    # 400 family
+    
     BAD_REQUEST = "bad_request"
 
-    # 500 family
     SERVICE_ERROR = "service_error"
     LLM_ERROR = "llm_error"
 
-    # 503
     SERVICE_UNAVAILABLE = "service_unavailable"
 
 
@@ -131,10 +129,6 @@ class UnavailableError(ApiException):
             internal_detail=internal_detail,
         )
 
-
-# ---------------------------------------------------------------------------
-# Keep legacy aliases so existing service code doesn't need mass-rename
-# ---------------------------------------------------------------------------
 ValidationError = BadRequestError
 MessageLimitError = BadRequestError
 MessageTooLongError = BadRequestError

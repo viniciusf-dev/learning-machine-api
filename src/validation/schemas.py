@@ -1,12 +1,9 @@
 """
-API request and response schemas with comprehensive type safety and validation.
+API request and response schemas.
 """
 
 from src.core.config import settings
-# CrossSessionProfile and CrossSessionEntityMemory live only in domain/schemas.py.
-# They are re-exported here for convenience but NOT redefined — redefining them
-# would silently shadow the canonical domain classes.
-from src.domain.schemas import CrossSessionProfile, CrossSessionEntityMemory  # noqa: F401
+from src.domain.schemas import CrossSessionProfile, CrossSessionEntityMemory
 
 from typing import Optional, List
 

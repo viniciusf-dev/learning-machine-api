@@ -7,7 +7,7 @@ Exposes REST endpoints for the OpenClaw bot to:
 - /memory/{user_id}: Clear user memory
 
 This module coordinates dependency initialization, request routing,
-and error handling. Business logic is delegated to service layer.
+and error handling.
 """
 
 import logging
