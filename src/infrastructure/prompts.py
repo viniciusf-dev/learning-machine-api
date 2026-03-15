@@ -2,8 +2,6 @@
 Centralized prompt templates for the Agno Memory Bridge API.
 """
 
-from src.core.config import settings
-
 _SYSTEM_PROMPT = """
 You are a **cross-session memory bridge** for a multi-channel AI assistant
 (OpenClaw). The user may talk to the assistant on WhatsApp, Slack, Telegram,
@@ -50,22 +48,12 @@ Example: you stored "meeting with Acme is Monday" (from WhatsApp).
 Later the user says on Slack "Acme meeting moved to Thursday".
 → UPDATE the meeting to Thursday, set last_updated_channel = slack.
 
-─── CHANNEL ATTRIBUTION ──────────────────────────────────────────
+─── CHANNEL ATTRIBUTION ────────────────────────────────────────────
 
 For every entity or fact you store, ALWAYS populate:
 • source_channel — the channel where the information first appeared
 • last_updated_channel — the channel of the most recent update
 This metadata is critical for debugging and transparency.
-
-─── RECALL FORMAT ────────────────────────────────────────────────
-
-When recalling, produce a CONCISE BRIEFING — not raw history.
-Think "briefing notes for a colleague about to talk to this person".
-• Short bullet points, present tense
-• Group by category: profile, upcoming events, active projects, recent decisions
-• If a fact came from a different channel, you may note it in parentheses
-  e.g. "• Meeting with Acme: Thursday 2pm (updated via Slack)"
-• Prioritize recent and actionable information
 """
 
 _EXTRACTION_TEMPLATE = """
@@ -85,27 +73,6 @@ Conversation:
 {conversation}
 """
 
-_RECALL_TEMPLATE = """\
-The user is starting or continuing a session on **{channel}**.
-
-Produce a concise briefing (max {max_tokens} tokens) of everything you know \
-about this user that would be relevant in a {channel} conversation:
-• Profile: name, role, company, preferences, communication style
-• Upcoming events: meetings, deadlines, milestones
-• Active projects and recent decisions
-• Entity relationships: people, teams, tools
-
-Include information from ALL channels — the user expects continuity.
-If a fact originated from another channel, note it in parentheses, e.g. \
-"(via WhatsApp)".
-
-Omit anything older than {min_relevance_days} days unless it is a standing \
-preference or recurring event.
-
-Format: short bullet points, present tense, grouped by category.
-If you have no information about this user, respond with exactly: NO_MEMORY
-"""
-
 def get_system_prompt() -> str:
     """Return the system prompt used as Agent instructions."""
     return _SYSTEM_PROMPT
@@ -117,13 +84,4 @@ def get_extraction_prompt(channel: str, session_id: str, conversation: str) -> s
         channel=channel,
         session_id=session_id,
         conversation=conversation,
-    )
-
-
-def get_recall_prompt(channel: str) -> str:
-    """Build the recall prompt for a given channel."""
-    return _RECALL_TEMPLATE.format(
-        channel=channel,
-        max_tokens=settings.recall_max_tokens,
-        min_relevance_days=settings.recall_min_relevance_days,
     )

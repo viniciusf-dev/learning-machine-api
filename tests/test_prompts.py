@@ -1,13 +1,12 @@
 """
 Tests for src/infrastructure/prompts.py
 
-Covers: get_system_prompt, get_extraction_prompt, get_recall_prompt.
+Covers: get_system_prompt, get_extraction_prompt.
 """
 
 from src.infrastructure.prompts import (
     get_system_prompt,
     get_extraction_prompt,
-    get_recall_prompt,
 )
 
 
@@ -53,22 +52,3 @@ class TestGetExtractionPrompt:
     def test_conflict_instructions_present(self):
         prompt = get_extraction_prompt("whatsapp", "s1", "msg")
         assert "conflict" in prompt.lower() or "UPDATE" in prompt
-
-
-class TestGetRecallPrompt:
-    def test_includes_channel(self):
-        prompt = get_recall_prompt("slack")
-        assert "slack" in prompt
-
-    def test_includes_no_memory_sentinel(self):
-        prompt = get_recall_prompt("whatsapp")
-        assert "NO_MEMORY" in prompt
-
-    def test_includes_all_channels_instruction(self):
-        prompt = get_recall_prompt("discord")
-        assert "ALL channels" in prompt or "all channels" in prompt
-
-    def test_includes_token_limit(self):
-        prompt = get_recall_prompt("whatsapp")
-        # Should contain the max_tokens value from settings
-        assert "300" in prompt or "tokens" in prompt.lower()

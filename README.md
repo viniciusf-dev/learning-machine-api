@@ -29,7 +29,7 @@ User on Slack gets: "• Acme meeting: Thursday (via WhatsApp)"
 4. [Cross-Channel Knowledge Flow](#4-cross-channel-knowledge-flow)
 5. [Conflict Resolution](#5-conflict-resolution)
 6. [Selective Propagation (Noise Filtering)](#6-selective-propagation-noise-filtering)
-7. [OpenClaw Integration — The Skill](#7-openclaw-integration--the-skill)
+7. [OpenClaw Integration — The Plugin](#7-openclaw-integration--the-plugin)
 8. [Cost Analysis](#8-cost-analysis)
 9. [Discussion Answers (Part 2)](#9-discussion-answers-part-2)
 10. [Setup & Running](#10-setup--running)
@@ -50,8 +50,8 @@ User on Slack gets: "• Acme meeting: Thursday (via WhatsApp)"
 └──────┬───────┘     └──────┬───────┘     └──────┬───────┘
        │                    │                    │
        │     ┌──────────────────────────┐        │
-       └────►│   OpenClaw Skill         │◄───────┘
-             │   (HTTP client)          │
+       └────►│   OpenClaw Plugin        │◄───────┘
+             │   (before_prompt_build)  │
              └──────────┬───────────────┘
                         │
               ┌─────────▼─────────┐
@@ -252,6 +252,20 @@ The three stores complement each other:
 
 All tables in Postgres are keyed by `user_id` alone — there is no `channel` column in the key. This means **cross-channel sharing is automatic**. A fact stored from WhatsApp is immediately visible when querying for the same `user_id` from Slack.
 
+#### How `user_id` is derived at runtime
+
+The OpenClaw plugin injects `curl` commands into the system prompt, and the `user_id` field is set via `$(whoami)` — the OS user running the OpenClaw gateway process. Inside the Docker container this resolves to `node`, so **all channels share the same `user_id` bucket automatically**.
+
+This is the correct behavior for a single-user setup (the challenge's target scenario): one person using the assistant across multiple channels should have one unified memory — and that's exactly what happens. There's no per-channel identity to reconcile.
+
+| Scenario | `user_id` value | Cross-channel? | Notes |
+|---|---|---|---|
+| **Docker (default)** | `node` | Yes — all channels share the same bucket | Works for single-user, which is the expected setup |
+| **Bare metal / local dev** | Your OS username | Yes — same as above | Same behavior, different string |
+| **Multi-user (future)** | Would need `senderId` from OpenClaw context | Per-user isolation | Requires adding `senderId?: string` to `PluginHookAgentContext` in OpenClaw core — optional field, non-breaking change |
+
+For production multi-tenant use, the plugin would need the actual sender identity from the channel adapter (e.g. a phone number from WhatsApp, a Slack user ID, etc.). OpenClaw's `PluginHookAgentContext` currently exposes `channelId` but not `senderId`. Adding it would be a one-line, non-breaking change to the core — but it's not needed for the single-user personal assistant scenario this challenge describes.
+
 ---
 
 ## 4. Cross-Channel Knowledge Flow
@@ -265,7 +279,7 @@ User: "My meeting with Acme Corp got moved to Thursday at 2pm"
 Assistant: "Got it! I'll remember the Acme meeting is Thursday at 2pm."
 ```
 
-OpenClaw skill calls `POST /process` with `channel: "whatsapp"`. The LLM extracts and stores:
+OpenClaw plugin calls `POST /process` with `channel: "whatsapp"`. The LLM extracts and stores:
 ```
 EntityMemory: {
   entity_type: "meeting",
@@ -279,7 +293,7 @@ EntityMemory: {
 
 **Step 2 — User opens Slack:**
 
-OpenClaw skill calls `POST /recall` with `channel: "slack"`. Response:
+OpenClaw plugin calls `POST /recall` with `channel: "slack"`. Response:
 ```json
 {
   "user_id": "eduardo",
@@ -388,26 +402,20 @@ Noise vs. signal is a semantic distinction. "That's interesting" after discussin
 
 ---
 
-## 7. OpenClaw Integration — The Skill
+## 7. OpenClaw Integration — The Plugin
 
-The Memory Bridge API is designed to be called by an **OpenClaw skill**.
+The Memory Bridge API is integrated into OpenClaw via a **bundled plugin** (`extensions/learning-machine/`) that lives in the [openclaw fork](https://github.com/viniciusf-dev/openclaw).
 
-The `SKILL.md` follows the [AgentSkills](https://agentskills.io/) spec and has two parts:
+The plugin hooks into the `before_prompt_build` lifecycle event — on **every agent turn**, before the model sees any message, it automatically injects mandatory `/recall` and `/process` instructions into the system prompt via `prependSystemContext`. The agent has no choice but to follow them.
 
-1. **YAML frontmatter** — `name`, `description`, and `metadata` (used for gating: the skill only loads if `LEARNING_MACHINE_API_URL` is set in the environment)
-2. **Markdown body** — instructions in plain English telling the agent exactly when and how to call our API via `curl`
+This is different from a skill (which the model decides whether to use) — the plugin fires unconditionally on every interaction.
 
 ### How it works at runtime
-
-OpenClaw injects eligible skill instructions into the agent's system prompt at session start. From that point:
-
-1. **On every interaction** — the agent calls `POST /process` via `curl` after responding, sending the conversation messages for knowledge extraction
-2. **Before responding to a new session** — the agent calls `GET /recall` first, injects the returned `context` string into its reasoning, and then replies
 
 ```
 User sends message (WhatsApp / Slack / any channel)
         ↓
-Agent reads SKILL.md instructions from system prompt
+before_prompt_build hook fires (plugin injects instructions into system prompt)
         ↓
 Agent calls curl → POST /recall  (gets prior cross-channel context)
         ↓
@@ -422,10 +430,41 @@ Agent calls curl → POST /process  (persists knowledge from this interaction)
 
 1. **`/recall` is called BEFORE the response** — the assistant gets context before it talks, so it can reference cross-channel knowledge naturally
 2. **`/process` is called AFTER the interaction** — both user and assistant messages are sent, so the LLM can extract knowledge from the full conversation
-3. **Context is prepended to the agent's reasoning**, not injected as a fake chat message — keeps the context window efficient
-4. **`has_memory: false` is handled gracefully** — if the API returns no memory, the skill instructs the agent to do nothing. The bot behaves as if the skill doesn't exist.
+3. **Context is prepended to the agent's system prompt** via `prependSystemContext` — prompt-cached, not injected as a fake chat message, keeps token cost efficient
+4. **`has_memory: false` is handled gracefully** — if the API returns no memory, the agent continues normally with no impact on the user
 5. **API errors fail silently** — if the Memory Bridge is down, the `curl` call fails and the agent continues normally. Memory sync degrades gracefully.
-6. **No TypeScript code needed** — the skill is pure Markdown. The OpenClaw agent runtime handles all tool invocation.
+6. **`channelId` is resolved automatically** — the plugin reads `ctx.channelId` from the agent runtime context (set by whichever channel adapter received the message) and passes it to the API. No manual configuration per channel.
+
+### Plugin configuration (`~/.openclaw/openclaw.json`)
+
+```json
+"plugins": {
+  "entries": {
+    "learning-machine": {
+      "enabled": true,
+      "hooks": { "allowPromptInjection": true },
+      "config": {
+        "apiUrl": "http://agno-api:8000",
+        "defaultChannel": "discord"
+      }
+    }
+  }
+}
+```
+
+See `openclaw.json.example` in the openclaw repo root for a full reference config.
+
+### How to run the full stack (OpenClaw + Memory Bridge)
+
+The complete setup instructions — including Docker commands, plugin verification, and a 3-step end-to-end demo — are in the plugin's own README:
+
+**[`extensions/learning-machine/README.md`](https://github.com/viniciusf-dev/openclaw/blob/main/extensions/learning-machine/README.md)** (in the OpenClaw fork)
+
+Quick summary:
+
+1. Start the Memory Bridge API: `docker compose up -d` (in this repo)
+2. Start the OpenClaw gateway with the learning-machine overlay: `docker compose -f docker-compose.yml -f docker-compose.learning-machine.yml up -d openclaw-gateway` (in the [openclaw fork](https://github.com/viniciusf-dev/openclaw))
+3. Verify: `docker exec openclaw-openclaw-gateway-1 openclaw plugins list | grep learning`
 
 ---
 
@@ -503,9 +542,9 @@ The "no vector database" stance is aligned with our approach. I'm using Agno's L
 
 ### 2.3 — Maintaining a Custom Fork
 
-**My strategy: skill-based integration, not a fork.**
+**My strategy: plugin-based integration, not a fork.**
 
-Our solution is a **standalone API** + an **OpenClaw skill**. The skill is a single `SKILL.md` file — pure Markdown instructions that teach the OpenClaw agent to call our API via `curl`. I don't touch OpenClaw's TypeScript core at all. In my opinion, this is the most sustainable architecture possible: if OpenClaw changes internally, our skill only breaks if the agent's `bash` tool or the `SKILL.md` format changes — both of which are far more stable than internal TypeScript APIs.
+Our solution is a **standalone API** + an **OpenClaw plugin** (`extensions/learning-machine/`). The plugin hooks into `before_prompt_build` to inject mandatory instructions on every agent turn — the agent can't skip them. I don't touch OpenClaw's core routing or session logic at all. In my opinion, this is the most sustainable architecture possible: if OpenClaw changes internally, our plugin only breaks if the `before_prompt_build` hook contract or `prependSystemContext` field changes — both of which are far more stable than internal APIs.
 
 **If I needed a fork anyway:**
 
@@ -519,7 +558,7 @@ Our solution is a **standalone API** + an **OpenClaw skill**. The skill is a sin
    - Feature flags: our modifications behind `MEMORY_BRIDGE_ENABLED=true` so they can be disabled
 4. **Contribute upstream:** If our memory bridge proves useful, upstream PRs are the best maintenance strategy. Less divergence = less rebase pain.
 5. **Testing:**
-   - Contract tests: verify OpenClaw's skill API hasn't changed shape
+   - Contract tests: verify OpenClaw's plugin hook API hasn't changed shape
    - Integration tests: spin up OpenClaw + our API in Docker Compose, run end-to-end scenarios
    - Version pinning: `openclaw==X.Y.Z` in requirements, not `>=`
 
@@ -591,8 +630,6 @@ uvicorn src.main:app --reload --port 8000
 | `LLM_REQUEST_TIMEOUT` | `30` | Seconds before an LLM call times out |
 | `LEARNING_MODE` | `always` | `always` \| `smart` \| `never` |
 | `ENABLE_ENTITY_MEMORY` | `true` | Track structured entities (meetings, projects, people) |
-| `RECALL_MAX_TOKENS` | `300` | Max tokens in the recall briefing |
-| `RECALL_MIN_RELEVANCE_DAYS` | `30` | Ignore facts older than N days |
 | `MAX_MESSAGES_PER_REQUEST` | `100` | Max messages per `/process` call |
 | `MAX_MESSAGE_LENGTH` | `10000` | Max characters per message |
 | `POSTGRES_HOST` | `postgres` | Postgres hostname (`localhost` for local dev) |
@@ -644,7 +681,7 @@ curl http://localhost:8000/health
 
 ### `POST /process` — Extract and persist knowledge
 
-Called by the OpenClaw skill **after** each user interaction.
+Called by the OpenClaw plugin **after** each user interaction.
 
 ```bash
 curl -X POST http://localhost:8000/process \
@@ -671,7 +708,7 @@ curl -X POST http://localhost:8000/process \
 
 ### `POST /recall` — Retrieve context briefing
 
-Called by the OpenClaw skill **before** each LLM response. Reads memories directly from the database — no LLM call, near-instant response.
+Called by the OpenClaw plugin **before** each LLM response. Reads memories directly from the database — no LLM call, near-instant response.
 
 ```bash
 curl -X POST http://localhost:8000/recall \

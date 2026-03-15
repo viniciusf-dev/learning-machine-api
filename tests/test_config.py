@@ -33,10 +33,6 @@ class TestSettingsDefaults:
         s = Settings(anthropic_api_key="sk-test")
         assert s.enable_entity_memory is True
 
-    def test_default_recall_max_tokens(self):
-        s = Settings(anthropic_api_key="sk-test")
-        assert s.recall_max_tokens == 300
-
     def test_default_max_messages_per_request(self):
         s = Settings(anthropic_api_key="sk-test")
         assert s.max_messages_per_request == 100

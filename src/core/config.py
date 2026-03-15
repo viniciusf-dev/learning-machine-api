@@ -51,19 +51,6 @@ class Settings(BaseSettings):
         description="Enable entity (people, projects, etc.) memory tracking"
     )
 
-    recall_max_tokens: int = Field(
-        default=300,
-        ge=50,
-        le=2000,
-        description="Maximum tokens in recall response"
-    )
-    recall_min_relevance_days: int = Field(
-        default=30,
-        ge=1,
-        le=3650,
-        description="Exclude memories older than this unless they are standing preferences"
-    )
-
     max_messages_per_request: int = Field(
         default=100,
         ge=1,
