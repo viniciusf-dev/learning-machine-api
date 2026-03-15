@@ -4,7 +4,7 @@ Custom Agno schemas for the OpenClaw cross-session memory bridge.
 
 from dataclasses import dataclass, field
 from typing import Optional, List
-from agno.learn.schemas import UserProfile, EntityMemory
+from agno.learn.schemas import UserProfile
 
 
 @dataclass
@@ -44,28 +44,3 @@ class CrossSessionProfile(UserProfile):
         metadata={"description": "List of recurring topics or domains the user frequently discusses"},
     )
 
-
-@dataclass
-class CrossSessionEntityMemory(EntityMemory):
-    """Extended entity memory for tracking real-world things the user mentions."""
-
-    entity_type: Optional[str] = field(
-        default=None,
-        metadata={"description": "Type of entity: person | company | project | meeting | deadline | tool"},
-    )
-    status: Optional[str] = field(
-        default=None,
-        metadata={"description": "Current status: active | pending | completed | cancelled | rescheduled"},
-    )
-    scheduled_date: Optional[str] = field(
-        default=None,
-        metadata={"description": "Date or day associated with this entity, e.g. 'Thursday', '2024-03-15'"},
-    )
-    source_channel: Optional[str] = field(
-        default=None,
-        metadata={"description": "Which channel this information came from: whatsapp | slack | telegram | etc."},
-    )
-    last_updated_channel: Optional[str] = field(
-        default=None,
-        metadata={"description": "Channel where this fact was most recently updated — used for conflict resolution"},
-    )

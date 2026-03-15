@@ -15,7 +15,7 @@ from src.infrastructure.prompts import get_extraction_prompt, get_recall_prompt
 
 logger = logging.getLogger(__name__)
 
-_RECALL_SESSION_ID = "__recall__"
+_RECALL_SESSION_PREFIX = "recall"
 
 
 class MemoryService:
@@ -73,10 +73,10 @@ class MemoryService:
         """
         Recall relevant context for a user in a new session.
 
-        Uses a fixed recall session ID to avoid accumulating ghost sessions.
+        Uses a prefixed session ID to avoid conflicts with regular sessions.
 
         Args:
-            context: Session context (user_id, channel)
+            context: Session context (user_id, session_id, channel)
 
         Returns:
             Briefing string if memories exist, None otherwise
@@ -86,6 +86,7 @@ class MemoryService:
             ServiceError: For any other failure
         """
         prompt = get_recall_prompt(context.channel)
+        recall_session_id = f"{_RECALL_SESSION_PREFIX}_{context.session_id}"
 
         logger.info(f"Recalling context for user={context.user_id}, channel={context.channel}")
 
@@ -94,7 +95,7 @@ class MemoryService:
                 self._agent.run,
                 prompt,
                 user_id=context.user_id,
-                session_id=_RECALL_SESSION_ID,
+                session_id=recall_session_id,
             )
         except Exception as e:
             self._raise_agent_error(e)

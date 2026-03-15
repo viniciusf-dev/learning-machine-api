@@ -74,7 +74,7 @@ User on Slack gets: "• Acme meeting: Thursday (via WhatsApp)"
               │                   │
               │  user_profiles    │ ← CrossSessionProfile
               │  user_memories    │ ← free-text facts
-              │  entity_memories  │ ← CrossSessionEntityMemory
+              │  entity_memories  │ ← Agno default EntityMemory
               └───────────────────┘
 ```
 
@@ -91,7 +91,7 @@ User on Slack gets: "• Acme meeting: Thursday (via WhatsApp)"
 
 1. **LearningMachine is purpose-built** for exactly this: extracting structured knowledge from conversations and recalling it later
 2. **`user_id`-keyed storage** — memories are inherently cross-channel (no partitioning by session or channel)
-3. **Schema-driven** — we define `CrossSessionProfile` and `CrossSessionEntityMemory` with typed fields; the LLM fills them via schema introspection
+3. **Schema-driven** — we define `CrossSessionProfile` with typed fields for user profiles; the LLM fills them via schema introspection. Entity memory uses Agno's default schema — channel attribution is handled entirely by the system prompt
 4. **Curator** — built-in memory curation (pruning, deduplication) without custom code
 5. **PostgreSQL backend** — battle-tested, easy to operate, no exotic infrastructure
 
@@ -146,14 +146,14 @@ No database check. A readiness probe (checking DB) could be added separately, bu
 
 2. MemoryService.recall_context()
    - Builds recall prompt for the current channel
-   - Calls agent.run() with fixed session_id="__recall__"
-     └── CRITICAL: Fixed session_id prevents ghost sessions accumulating per recall call
+   - Calls agent.run() with session_id="recall_{original_session_id}"
+     └── Prefixed session_id keeps recall separate from conversation sessions
      └── Agno loads user_id profile, memories, entities from Postgres
      └── Claude synthesizes a briefing from ALL channels
      └── Annotates facts with "(via WhatsApp)", "(via Slack)", etc.
 
 3. Parse response:
-   - If LLM responds "NO_MEMORY" → has_memory=false, context=null
+   - If LLM responds "NO_MEMORY" or returns empty → has_memory=false, context=null
    - Otherwise → has_memory=true, context="• Acme meeting: Thursday (via WhatsApp)\n..."
 
 4. Return response
@@ -193,8 +193,7 @@ LearningMachine
 ├── UserProfileConfig    → stores structured profile (name, role, preferences)
 │   └── schema: CrossSessionProfile (our custom dataclass)
 ├── UserMemoryConfig     → stores free-text facts ("prefers dark mode")
-└── EntityMemoryConfig   → stores entities with relationships
-    └── schema: CrossSessionEntityMemory (our custom dataclass with source_channel)
+└── entity_memory=True   → stores entities with relationships (Agno default schema)
 ```
 
 ### LearningMode options
@@ -224,19 +223,11 @@ class CrossSessionProfile(UserProfile):
 
 Each field has `metadata={"description": "..."}` — Agno passes these descriptions to the LLM so it knows what to populate.
 
-### CrossSessionEntityMemory
+### EntityMemory (default)
 
-```python
-@dataclass
-class CrossSessionEntityMemory(EntityMemory):
-    entity_type: Optional[str]             # person | meeting | project | ...
-    status: Optional[str]                  # active | pending | completed
-    scheduled_date: Optional[str]          # "Thursday", "2024-03-15"
-    source_channel: Optional[str]          # whatsapp | slack | ... (where info came from)
-    last_updated_channel: Optional[str]    # which channel last modified this entity
-```
+Entity memory uses Agno's built-in `EntityMemory` schema with `entity_memory=True` — no custom dataclass. Channel attribution (`source_channel`, `last_updated_channel`) is handled entirely through the **system prompt** and **extraction prompt**, where the LLM is instructed to embed channel info directly into entity facts (e.g. `"Acme Corp meeting scheduled for Thursday at 2pm (source: whatsapp)"`).
 
-**`source_channel`** and **`last_updated_channel`** are the backbone of cross-channel conflict resolution. The LLM is instructed (via system prompt, extraction prompt, and `EntityMemoryConfig.instructions`) to always populate these fields.
+**Why not a custom schema?** We initially tried `CrossSessionEntityMemory(EntityMemory)` with typed `source_channel` / `last_updated_channel` fields, but Agno's entity memory doesn't propagate `user_id` correctly when using a custom schema — entities were saved with `user_id=NULL`, making them invisible during recall. The default schema works reliably and the LLM embeds channel metadata in the text naturally.
 
 ### UserMemory
 
@@ -248,7 +239,7 @@ class CrossSessionEntityMemory(EntityMemory):
 "User asked to always respond in Portuguese"
 ```
 
-This is the right store for facts that don't fit a rigid schema. `CrossSessionProfile` holds identity-level structure (role, company, timezone). `CrossSessionEntityMemory` holds named things (meetings, projects, people). `UserMemory` catches everything in between — preferences, context, behavioral notes — as plain text that the LLM can read naturally.
+This is the right store for facts that don't fit a rigid schema. `CrossSessionProfile` holds identity-level structure (role, company, timezone). Entity memory holds named things (meetings, projects, people). `UserMemory` catches everything in between — preferences, context, behavioral notes — as plain text that the LLM can read naturally.
 
 The three stores complement each other:
 
@@ -256,7 +247,7 @@ The three stores complement each other:
 |---|---|---|
 | `UserProfileConfig` | `CrossSessionProfile` | Identity: role, company, timezone, preferred channel, communication style |
 | `UserMemoryConfig` | *(none — free text)* | Preferences, habits, behavioral notes, anything unstructured |
-| `EntityMemoryConfig` | `CrossSessionEntityMemory` | Named things: meetings, projects, deadlines, people — with channel attribution |
+| `entity_memory=True` | *(Agno default)* | Named things: meetings, projects, deadlines, people — channel attribution via prompt |
 
 ### Storage model
 
@@ -347,11 +338,7 @@ If a fact conflicts with something you already know, UPDATE it (latest wins)
 and set last_updated_channel = "{channel}".
 ```
 
-**Layer 3 — `EntityMemoryConfig.instructions`:**
-```
-When a fact conflicts with an existing one, the MOST RECENT update wins
-(latest-write-wins). Update the entity instead of creating a duplicate.
-```
+The system prompt and extraction prompt work together: the system prompt defines the general principle (latest-write-wins), and the extraction prompt reinforces it per-request with the specific channel name. This two-layer approach ensures the LLM consistently applies conflict resolution regardless of which channel the message comes from.
 
 ### Why prompt-driven and not code-driven?
 

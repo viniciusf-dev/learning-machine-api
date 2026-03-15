@@ -13,8 +13,6 @@ from .schemas import (
     HealthResponse,
     ClearMemoryResponse,
     ErrorDetail,
-    CrossSessionProfile,
-    CrossSessionEntityMemory,
 )
 
 __all__ = [
@@ -26,6 +24,4 @@ __all__ = [
     "HealthResponse",
     "ClearMemoryResponse",
     "ErrorDetail",
-    "CrossSessionProfile",
-    "CrossSessionEntityMemory",
 ]

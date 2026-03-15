@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from agno.agent import Agent
 from agno.db.postgres import PostgresDb
 from agno.learn import (
-    EntityMemoryConfig,
     LearningMachine,
     LearningMode,
     UserMemoryConfig,
@@ -23,7 +22,7 @@ from agno.models.anthropic import Claude
 from fastapi import FastAPI, Request
 
 from src.core.config import settings
-from src.domain.schemas import CrossSessionProfile, CrossSessionEntityMemory
+from src.domain.schemas import CrossSessionProfile
 from src.infrastructure.prompts import get_system_prompt
 
 
@@ -48,22 +47,6 @@ def _build_agent(db: PostgresDb) -> Agent:
     """Create and configure the learning agent with cross-channel memory."""
     learning_mode = LearningMode[settings.learning_mode.upper()]
 
-    entity_memory_cfg = (
-        EntityMemoryConfig(
-            mode=learning_mode,
-            schema=CrossSessionEntityMemory,
-            instructions=("""
-                Always set source_channel to the channel the information came from.
-                Always set last_updated_channel when updating an entity.
-                When a fact conflicts with an existing one, the MOST RECENT update wins
-                (latest-write-wins). Update the entity instead of creating a duplicate.
-                """
-            ),
-        )
-        if settings.enable_entity_memory
-        else False
-    )
-
     return Agent(
         model=Claude(
             id=settings.llm_model_id,
@@ -79,7 +62,7 @@ def _build_agent(db: PostgresDb) -> Agent:
             user_memory=UserMemoryConfig(
                 mode=learning_mode,
             ),
-            entity_memory=entity_memory_cfg,
+            entity_memory=settings.enable_entity_memory,
         ),
         instructions=get_system_prompt(),
     )

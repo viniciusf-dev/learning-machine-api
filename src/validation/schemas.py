@@ -3,7 +3,6 @@ API request and response schemas.
 """
 
 from src.core.config import settings
-from src.domain.schemas import CrossSessionProfile, CrossSessionEntityMemory
 
 from typing import Optional, List
 
