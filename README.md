@@ -391,50 +391,42 @@ Noise vs. signal is a semantic distinction. "That's interesting" after discussin
 
 ## 7. OpenClaw Integration — The Skill
 
-The Memory Bridge API is designed to be called by an **OpenClaw skill** — a plugin that hooks into the bot's message lifecycle.
+The Memory Bridge API is designed to be called by an **OpenClaw skill**.
 
-### How the skill works
+The `SKILL.md` follows the [AgentSkills](https://agentskills.io/) spec and has two parts:
 
-The skill hooks into two lifecycle events:
+1. **YAML frontmatter** — `name`, `description`, and `metadata` (used for gating: the skill only loads if `LEARNING_MACHINE_API_URL` is set in the environment)
+2. **Markdown body** — instructions in plain English telling the agent exactly when and how to call our API via `curl`
 
-1. **`on_before_response`** — called before the LLM generates a response → calls `/recall` to get context and injects it into the session's system prompt
-2. **`on_after_interaction`** — called after the interaction is complete → calls `/process` to persist any new knowledge
+### How it works at runtime
 
-```python
-class MemoryBridgeSkill:
+OpenClaw injects eligible skill instructions into the agent's system prompt at session start. From that point:
 
-    API_BASE = "http://localhost:8000"   # or configured URL
+1. **On every interaction** — the agent calls `POST /process` via `curl` after responding, sending the conversation messages for knowledge extraction
+2. **Before responding to a new session** — the agent calls `GET /recall` first, injects the returned `context` string into its reasoning, and then replies
 
-    async def on_before_response(self, session):
-        """Inject cross-channel context before the LLM responds."""
-        resp = await http.post(f"{self.API_BASE}/recall", json={
-            "user_id": session.user_id,
-            "session_id": session.session_id,
-            "channel": session.channel,
-        })
-        data = resp.json()
-        if data["has_memory"]:
-            session.prepend_context(
-                f"## Known context about this user:\n{data['context']}"
-            )
-
-    async def on_after_interaction(self, session, messages):
-        """Persist knowledge from the completed interaction."""
-        await http.post(f"{self.API_BASE}/process", json={
-            "user_id": session.user_id,
-            "session_id": session.session_id,
-            "channel": session.channel,
-            "messages": [{"role": m.role, "content": m.content} for m in messages],
-        })
+```
+User sends message (WhatsApp / Slack / any channel)
+        ↓
+Agent reads SKILL.md instructions from system prompt
+        ↓
+Agent calls curl → POST /recall  (gets prior cross-channel context)
+        ↓
+Agent uses context to craft a personalized response
+        ↓
+Agent replies to user
+        ↓
+Agent calls curl → POST /process  (persists knowledge from this interaction)
 ```
 
 ### Key integration points
 
 1. **`/recall` is called BEFORE the response** — the assistant gets context before it talks, so it can reference cross-channel knowledge naturally
 2. **`/process` is called AFTER the interaction** — both user and assistant messages are sent, so the LLM can extract knowledge from the full conversation
-3. **Context is injected into the system prompt**, not into the conversation history — this keeps the context window efficient and doesn't confuse the session's LLM
-4. **`has_memory: false` is handled gracefully** — if the API returns no memory, the skill does nothing. The bot behaves as if the skill doesn't exist.
-5. **API errors fail silently** — if the Memory Bridge is down, the bot still responds. Memory sync degrades gracefully.
+3. **Context is prepended to the agent's reasoning**, not injected as a fake chat message — keeps the context window efficient
+4. **`has_memory: false` is handled gracefully** — if the API returns no memory, the skill instructs the agent to do nothing. The bot behaves as if the skill doesn't exist.
+5. **API errors fail silently** — if the Memory Bridge is down, the `curl` call fails and the agent continues normally. Memory sync degrades gracefully.
+6. **No TypeScript code needed** — the skill is pure Markdown. The OpenClaw agent runtime handles all tool invocation.
 
 ---
 
@@ -514,7 +506,7 @@ The "no vector database" stance is aligned with our approach. I'm using Agno's L
 
 **My strategy: skill-based integration, not a fork.**
 
-Our solution is a **standalone API** + an **OpenClaw skill**. I don't modify OpenClaw's core codebase. The skill is a plugin that calls our API via HTTP. In my opinion, this is a very sustainable architecture, if OpenClaw changes internally, my skill only breaks if the skill lifecycle hooks change shape.
+Our solution is a **standalone API** + an **OpenClaw skill**. The skill is a single `SKILL.md` file — pure Markdown instructions that teach the OpenClaw agent to call our API via `curl`. I don't touch OpenClaw's TypeScript core at all. In my opinion, this is the most sustainable architecture possible: if OpenClaw changes internally, our skill only breaks if the agent's `bash` tool or the `SKILL.md` format changes — both of which are far more stable than internal TypeScript APIs.
 
 **If I needed a fork anyway:**
 
