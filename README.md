@@ -2,7 +2,7 @@
 
 A **cross-session memory synchronization layer** for [OpenClaw](https://github.com/openclaw/openclaw). Each OpenClaw channel (WhatsApp, Slack, Telegram, Discord, Teams) runs its own isolated session, this API is the shared brain that links them.
 
-Instead of merging conversation contexts (which would explode token costs), the API extracts only **meaningful knowledge** from each interaction and stores it in PostgreSQL via Agno's Learning Machines. When a user starts a session on any channel, the API returns a concise briefing of everything relevant about them, regardless of which channel that information originally came from.
+Instead of merging conversation contexts (which would explode token costs), the API extracts only **meaningful knowledge** from each interaction and stores it in PostgreSQL via Agno's Learning Machines. When a user starts a session on any channel, the API reads stored memories directly from the database and returns them — no LLM call needed for retrieval, regardless of which channel that information originally came from.
 
 ```
 User on WhatsApp: "My Acme meeting was moved to Thursday"
@@ -137,7 +137,7 @@ No database check. A readiness probe (checking DB) could be added separately, bu
 
 ### `POST /recall` — Context Retrieval
 
-**Purpose:** When the user starts or continues a session on any channel, OpenClaw calls this to get a briefing of everything the API knows about the user.
+**Purpose:** When the user starts or continues a session on any channel, OpenClaw calls this to get everything the API knows about the user.
 
 **Internal flow:**
 
@@ -145,16 +145,15 @@ No database check. A readiness probe (checking DB) could be added separately, bu
 1. Pydantic validates request
 
 2. MemoryService.recall_context()
-   - Builds recall prompt for the current channel
-   - Calls agent.run() with session_id="recall_{original_session_id}"
-     └── Prefixed session_id keeps recall separate from conversation sessions
-     └── Agno loads user_id profile, memories, entities from Postgres
-     └── Claude synthesizes a briefing from ALL channels
-     └── Annotates facts with "(via WhatsApp)", "(via Slack)", etc.
+   - Accesses agent.learning_machine (lazy property → injects DB on first call)
+   - Calls learning_machine.build_context(user_id=...)
+     └── Queries Postgres for user_profile, user_memory, entity_memory
+     └── Formats results with Agno's built-in template
+     └── No LLM call — pure database read + string formatting
 
 3. Parse response:
-   - If LLM responds "NO_MEMORY" or returns empty → has_memory=false, context=null
-   - Otherwise → has_memory=true, context="• Acme meeting: Thursday (via WhatsApp)\n..."
+   - If build_context returns empty → has_memory=false, context=null
+   - Otherwise → has_memory=true, context="<user_memory>\n- Acme meeting: Thursday (source: whatsapp)\n..."
 
 4. Return response
 ```
@@ -163,9 +162,9 @@ No database check. A readiness probe (checking DB) could be added separately, bu
 ![recall diagram](src/media/recall_route.png)
 
 **Key design decisions:**
+- **No LLM call on recall.** The previous approach used `agent.run()` to have Claude synthesize a briefing, but this added ~3-5s latency and ~$0.0003 per call. Now recall is a direct DB read (~100-200ms, zero token cost).
 - `context` is `Optional[str]`, not `str`. When `has_memory=false`, context is `null`, not an empty string. This makes the two fields semantically consistent.
-- The recall prompt explicitly says "include information from ALL channels" — this is the cross-channel propagation.
-- Channel attribution: `(via WhatsApp)` lets the user and developer know where a fact came from.
+- The OpenClaw agent receiving the context decides how to use the memories — it doesn't need a pre-summarized briefing.
 - This endpoint is **read-only** — it never writes to Postgres.
 
 ### `DELETE /memory/{user_id}` — Clear Memory
@@ -437,14 +436,14 @@ Agent calls curl → POST /process  (persists knowledge from this interaction)
 | Operation | Input tokens (approx) | Output tokens (approx) | Cost (Claude Haiku) |
 |---|---|---|---|
 | `/process` — extraction | ~500 (system) + ~200 (conversation) = ~700 | ~100 (extracted facts) | ~$0.0002 |
-| `/recall` — retrieval | ~500 (system) + ~100 (recall prompt) = ~600 | ~300 (briefing) | ~$0.0003 |
-| **Total per interaction** | ~1,300 | ~400 | **~$0.0005** |
+| `/recall` — retrieval | 0 (direct DB read) | 0 (no LLM call) | **$0** |
+| **Total per interaction** | ~700 | ~100 | **~$0.0002** |
 
 ### Comparison with alternatives
 
 | Approach | Cost per interaction | Scaling behavior |
 |---|---|---|
-| **Memory Bridge (mine)** | ~$0.0005 | Constant — doesn't grow with number of channels |
+| **Memory Bridge (mine)** | ~$0.0002 | Constant — doesn't grow with number of channels |
 | **Unified context (naive)** | ~$0.005+ | Linear with channels × history length |
 | **Full history replay** | ~$0.05+ | Quadratic with conversation length |
 
@@ -672,7 +671,7 @@ curl -X POST http://localhost:8000/process \
 
 ### `POST /recall` — Retrieve context briefing
 
-Called by the OpenClaw skill **before** each LLM response.
+Called by the OpenClaw skill **before** each LLM response. Reads memories directly from the database — no LLM call, near-instant response.
 
 ```bash
 curl -X POST http://localhost:8000/recall \

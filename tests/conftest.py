@@ -31,10 +31,11 @@ class FakeAgentResponse:
 
 
 class FakeLearningMachine:
-    """Mimics agent.get_learning_machine() result."""
+    """Mimics agent.get_learning_machine() / agent.learning_machine result."""
 
-    def __init__(self, curator=None):
+    def __init__(self, curator=None, build_context_return="• Meeting at 3pm"):
         self.curator = curator
+        self.build_context = MagicMock(return_value=build_context_return)
 
 
 class FakeCurator:
@@ -62,6 +63,9 @@ def mock_agent():
     curator = FakeCurator()
     lm = FakeLearningMachine(curator=curator)
     agent.get_learning_machine = MagicMock(return_value=lm)
+
+    # learning_machine is a property on the real Agent; mock it as a plain attribute
+    agent.learning_machine = lm
 
     return agent
 

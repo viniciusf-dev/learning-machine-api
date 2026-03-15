@@ -100,7 +100,7 @@ class TestProcessEndpoint:
 
 class TestRecallEndpoint:
     def test_success_with_memory(self, client, mock_agent, valid_recall_payload):
-        mock_agent.run.return_value = FakeAgentResponse("• Meeting at 3pm")
+        mock_agent.learning_machine.build_context.return_value = "• Meeting at 3pm"
         resp = client.post("/recall", json=valid_recall_payload)
         assert resp.status_code == 200
         data = resp.json()
@@ -109,7 +109,7 @@ class TestRecallEndpoint:
         assert data["user_id"] == "user_123"
 
     def test_no_memory(self, client, mock_agent, valid_recall_payload):
-        mock_agent.run.return_value = FakeAgentResponse("NO_MEMORY")
+        mock_agent.learning_machine.build_context.return_value = ""
         resp = client.post("/recall", json=valid_recall_payload)
         assert resp.status_code == 200
         data = resp.json()
@@ -127,20 +127,19 @@ class TestRecallEndpoint:
         assert resp.status_code == 422
 
     def test_agent_error_returns_500(self, client, mock_agent, valid_recall_payload):
-        mock_agent.run.side_effect = Exception("kaboom")
+        mock_agent.learning_machine.build_context.side_effect = Exception("kaboom")
         resp = client.post("/recall", json=valid_recall_payload)
         assert resp.status_code == 500
 
-    def test_recall_session_id_format(self, client, mock_agent, valid_recall_payload):
-        valid_recall_payload["session_id"] = "sess_xyz"
-        mock_agent.run.return_value = FakeAgentResponse("info")
+    def test_recall_uses_build_context_not_run(self, client, mock_agent, valid_recall_payload):
+        mock_agent.learning_machine.build_context.return_value = "info"
         resp = client.post("/recall", json=valid_recall_payload)
         assert resp.status_code == 200
-        call_kwargs = mock_agent.run.call_args
-        assert call_kwargs.kwargs["session_id"] == "recall_sess_xyz"
+        mock_agent.run.assert_not_called()
+        mock_agent.learning_machine.build_context.assert_called_once()
 
     def test_empty_response_returns_no_memory(self, client, mock_agent, valid_recall_payload):
-        mock_agent.run.return_value = FakeAgentResponse("")
+        mock_agent.learning_machine.build_context.return_value = ""
         resp = client.post("/recall", json=valid_recall_payload)
         data = resp.json()
         assert data["has_memory"] is False

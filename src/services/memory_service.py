@@ -11,11 +11,9 @@ from agno.agent import Agent
 from src.core.config import settings
 from src.core.errors import BadRequestError, ServiceError, LlmError
 from src.domain.models import Message, SessionContext
-from src.infrastructure.prompts import get_extraction_prompt, get_recall_prompt
+from src.infrastructure.prompts import get_extraction_prompt
 
 logger = logging.getLogger(__name__)
-
-_RECALL_SESSION_PREFIX = "recall"
 
 
 class MemoryService:
@@ -73,37 +71,37 @@ class MemoryService:
         """
         Recall relevant context for a user in a new session.
 
-        Uses a prefixed session ID to avoid conflicts with regular sessions.
+        Reads stored memories directly from the LearningMachine via
+        build_context() — no LLM call needed, just a database lookup.
+        Accessing agent.learning_machine (the lazy property) ensures the db
+        is injected into the underlying stores before the query runs.
 
         Args:
             context: Session context (user_id, session_id, channel)
 
         Returns:
-            Briefing string if memories exist, None otherwise
+            Context string if memories exist, None otherwise
 
         Raises:
-            LlmError: If the LLM times out or returns an error
-            ServiceError: For any other failure
+            ServiceError: For any database or initialization failure
         """
-        prompt = get_recall_prompt(context.channel)
-        recall_session_id = f"{_RECALL_SESSION_PREFIX}_{context.session_id}"
-
         logger.info(f"Recalling context for user={context.user_id}, channel={context.channel}")
 
         try:
-            response = await asyncio.to_thread(
-                self._agent.run,
-                prompt,
+            lm = self._agent.learning_machine
+            if lm is None:
+                raise ServiceError("Learning machine not available on agent")
+
+            content = await asyncio.to_thread(
+                lm.build_context,
                 user_id=context.user_id,
-                session_id=recall_session_id,
             )
+        except ServiceError:
+            raise
         except Exception as e:
             self._raise_agent_error(e)
 
-        content = self._extract_content(response)
-
-        if content and content.strip().upper() == "NO_MEMORY":
-            content = None
+        content = content.strip() if content else None
 
         logger.info(
             f"Recalled context for user={context.user_id}, length={len(content or '')} chars"

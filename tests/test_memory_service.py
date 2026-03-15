@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch, AsyncMock
 
 from src.core.errors import BadRequestError, ServiceError, LlmError
 from src.domain.models import Message, SessionContext
-from src.services.memory_service import MemoryService, _RECALL_SESSION_PREFIX
+from src.services.memory_service import MemoryService
 
 from tests.conftest import FakeAgentResponse, FakeLearningMachine, FakeCurator
 
@@ -97,7 +97,7 @@ class TestProcessMessages:
 class TestRecallContext:
     @pytest.mark.asyncio
     async def test_success_returns_content(self, mock_agent):
-        mock_agent.run.return_value = FakeAgentResponse("• Meeting at 3pm")
+        mock_agent.learning_machine.build_context.return_value = "• Meeting at 3pm"
         svc = MemoryService(mock_agent)
         ctx = _make_context(channel="slack", session_id="sess_abc")
 
@@ -105,18 +105,29 @@ class TestRecallContext:
         assert result == "• Meeting at 3pm"
 
     @pytest.mark.asyncio
-    async def test_recall_session_id_uses_prefix(self, mock_agent):
-        mock_agent.run.return_value = FakeAgentResponse("info")
+    async def test_calls_build_context_with_user_id(self, mock_agent):
+        mock_agent.learning_machine.build_context.return_value = "info"
         svc = MemoryService(mock_agent)
         ctx = _make_context(session_id="my_sess")
 
         await svc.recall_context(ctx)
-        call_kwargs = mock_agent.run.call_args
-        assert call_kwargs.kwargs["session_id"] == f"{_RECALL_SESSION_PREFIX}_my_sess"
+        mock_agent.learning_machine.build_context.assert_called_once_with(
+            user_id="user_1",
+        )
 
     @pytest.mark.asyncio
-    async def test_no_memory_sentinel_returns_none(self, mock_agent):
-        mock_agent.run.return_value = FakeAgentResponse("NO_MEMORY")
+    async def test_does_not_call_agent_run(self, mock_agent):
+        """Recall uses build_context, NOT agent.run — no LLM call."""
+        mock_agent.learning_machine.build_context.return_value = "info"
+        svc = MemoryService(mock_agent)
+        ctx = _make_context()
+
+        await svc.recall_context(ctx)
+        mock_agent.run.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_none_build_context_returns_none(self, mock_agent):
+        mock_agent.learning_machine.build_context.return_value = None
         svc = MemoryService(mock_agent)
         ctx = _make_context()
 
@@ -124,26 +135,8 @@ class TestRecallContext:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_no_memory_case_insensitive(self, mock_agent):
-        mock_agent.run.return_value = FakeAgentResponse("  no_memory  ")
-        svc = MemoryService(mock_agent)
-        ctx = _make_context()
-
-        result = await svc.recall_context(ctx)
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_none_response_returns_none(self, mock_agent):
-        mock_agent.run.return_value = None
-        svc = MemoryService(mock_agent)
-        ctx = _make_context()
-
-        result = await svc.recall_context(ctx)
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_empty_content_returns_none(self, mock_agent):
-        mock_agent.run.return_value = FakeAgentResponse("")
+    async def test_empty_build_context_returns_none(self, mock_agent):
+        mock_agent.learning_machine.build_context.return_value = ""
         svc = MemoryService(mock_agent)
         ctx = _make_context()
 
@@ -152,7 +145,7 @@ class TestRecallContext:
 
     @pytest.mark.asyncio
     async def test_whitespace_only_returns_none(self, mock_agent):
-        mock_agent.run.return_value = FakeAgentResponse("   ")
+        mock_agent.learning_machine.build_context.return_value = "   "
         svc = MemoryService(mock_agent)
         ctx = _make_context()
 
@@ -160,22 +153,31 @@ class TestRecallContext:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_response_without_content_attr(self, mock_agent):
-        mock_agent.run.return_value = "just a string"
+    async def test_learning_machine_none_raises_service_error(self, mock_agent):
+        mock_agent.learning_machine = None
         svc = MemoryService(mock_agent)
         ctx = _make_context()
 
-        result = await svc.recall_context(ctx)
-        # String doesn't have .content → should return None
-        assert result is None
+        with pytest.raises(ServiceError) as exc_info:
+            await svc.recall_context(ctx)
+        assert "Learning machine not available" in exc_info.value.internal_detail
 
     @pytest.mark.asyncio
-    async def test_agent_timeout_raises_llm_error(self, mock_agent):
-        mock_agent.run.side_effect = Exception("timed out")
+    async def test_build_context_timeout_raises_llm_error(self, mock_agent):
+        mock_agent.learning_machine.build_context.side_effect = Exception("timed out")
         svc = MemoryService(mock_agent)
         ctx = _make_context()
 
         with pytest.raises(LlmError):
+            await svc.recall_context(ctx)
+
+    @pytest.mark.asyncio
+    async def test_build_context_db_error_raises_service_error(self, mock_agent):
+        mock_agent.learning_machine.build_context.side_effect = Exception("database connection lost")
+        svc = MemoryService(mock_agent)
+        ctx = _make_context()
+
+        with pytest.raises(ServiceError):
             await svc.recall_context(ctx)
 
 
