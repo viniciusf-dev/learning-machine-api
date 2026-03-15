@@ -1,19 +1,16 @@
 """
 API endpoints for the Agno Memory Bridge API.
 
-Exposes REST endpoints for:
-- /process: Extract and persist cross-session knowledge from conversations
-- /recall: Retrieve relevant context for multi-channel sessions
-- /memory/{user_id}: Clear user memory
-- /health: Health check
+All endpoints are async. I/O-bound work (Postgres + Claude) is offloaded
+to threads inside MemoryService via asyncio.to_thread.
 """
 
+import asyncio
 import logging
-from fastapi import HTTPException, status
+from fastapi import Request
 
-from src.core.errors import ApiException, handle_api_exception, handle_unexpected_error
-from src.core.config import settings
-from src.infrastructure.dependencies import get_service_container
+from src.core.errors import ApiException, UnavailableError, handle_api_exception, handle_unexpected_error
+from src.infrastructure.dependencies import get_agent
 from src.validation.schemas import (
     ProcessRequest,
     ProcessResponse,
@@ -21,156 +18,105 @@ from src.validation.schemas import (
     RecallResponse,
     HealthResponse,
     ClearMemoryResponse,
-    MessageRequest,
 )
 from src.domain.models import Message, SessionContext
-from src.services import ConversationProcessor, ContextRecall, MemoryCurator
+from src.services.memory_service import MemoryService
 
 logger = logging.getLogger(__name__)
 
+_REQUEST_TIMEOUT = 120
+
 
 async def health() -> HealthResponse:
-    """
-    Simple health check endpoint.
-    
-    Returns 200 OK if the service is running and responding.
-    Does not validate database connectivity.
-    """
+    """Liveness probe. Returns 200 if the service is running."""
     return HealthResponse(status="ok")
 
 
-async def process_messages(req: ProcessRequest) -> ProcessResponse:
+async def process_messages(req: ProcessRequest, request: Request) -> ProcessResponse:
     """
     Process a conversation and extract knowledge for cross-session recall.
-    
+
     Args:
-        req: ProcessRequest containing user_id, session_id, channel, and messages
-        
+        req: ProcessRequest with user_id, session_id, channel, and messages
+        request: FastAPI request (used to access app.state)
+
     Returns:
-        ProcessResponse with status (processed or skipped)
-        
-    Raises:
-        ValidationError: If request is invalid
-        MessageLimitError: If message count exceeds limit
-        MessageTooLongError: If any message is too long
-        InvalidUserIdError: If user_id is invalid
-        InvalidSessionIdError: If session_id is invalid
-        InvalidChannelError: If channel is not supported
-        LearningMachineError: If memory extraction fails
-        LlmError: If LLM service fails
+        ProcessResponse with status
     """
-    
     if not req.messages:
-        logger.debug(f"Skipping process request: no messages for {req.user_id}")
         return ProcessResponse(status="skipped", reason="no messages")
 
-    
-    try:
-        context = SessionContext(
-            user_id=req.user_id,
-            session_id=req.session_id,
-            channel=req.channel,
-        )
+    agent = get_agent(request)
+    context = SessionContext(
+        user_id=req.user_id,
+        session_id=req.session_id,
+        channel=req.channel,
+    )
+    messages = [Message(role=m.role, content=m.content) for m in req.messages]
 
-        messages = [
-            Message(role=m.role, content=m.content)
-            for m in req.messages
-        ]
-    except ApiException:
-        raise
-
-    
-    container = get_service_container()
-    if not container.is_initialized:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Service not initialized",
-        )
-
-    processor = ConversationProcessor(container.agent)
-    processor.process_messages(context, messages)
+    service = MemoryService(agent)
+    await asyncio.wait_for(
+        service.process_messages(context, messages),
+        timeout=_REQUEST_TIMEOUT,
+    )
 
     return ProcessResponse(status="processed")
 
 
-async def recall_context(req: RecallRequest) -> RecallResponse:
+async def recall_context(req: RecallRequest, request: Request) -> RecallResponse:
     """
     Recall relevant context for a user session.
-    
+
     Args:
-        req: RecallRequest containing user_id, session_id, and channel
-        
+        req: RecallRequest with user_id, session_id, and channel
+        request: FastAPI request (used to access app.state)
+
     Returns:
-        RecallResponse with recalled context and has_memory flag
-        
-    Raises:
-        ValidationError: If request is invalid
-        InvalidUserIdError: If user_id is invalid
-        InvalidSessionIdError: If session_id is invalid
-        InvalidChannelError: If channel is not supported
-        LearningMachineError: If memory recall fails
-        LlmError: If LLM service fails
+        RecallResponse with optional context and has_memory flag
     """
-    
-    try:
-        context = SessionContext(
-            user_id=req.user_id,
-            session_id=req.session_id,
-            channel=req.channel,
-        )
-    except ApiException:
-        raise
+    agent = get_agent(request)
+    context = SessionContext(
+        user_id=req.user_id,
+        session_id=req.session_id,
+        channel=req.channel,
+    )
 
-   
-    container = get_service_container()
-    if not container.is_initialized:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Service not initialized",
-        )
-
-    recall_service = ContextRecall(container.agent)
-    recalled_context = recall_service.recall_context(context)
+    service = MemoryService(agent)
+    recalled = await asyncio.wait_for(
+        service.recall_context(context),
+        timeout=_REQUEST_TIMEOUT,
+    )
 
     return RecallResponse(
         user_id=req.user_id,
-        context=recalled_context,
-        has_memory=bool(recalled_context),
+        context=recalled,
+        has_memory=recalled is not None,
     )
 
 
-async def clear_memory(user_id: str) -> ClearMemoryResponse:
+async def clear_memory(user_id: str, request: Request) -> ClearMemoryResponse:
     """
     Clear all memories for a user.
-    
-    Permanently deletes all user profile data, memories, and entity information.
-    This operation cannot be undone.
-    
+
+    user_id comes as a path parameter without Pydantic validation, so we
+    validate it explicitly here via SessionContext.
+
     Args:
-        user_id: User identifier
-        
+        user_id: User identifier (path parameter — validated manually)
+        request: FastAPI request (used to access app.state)
+
     Returns:
         ClearMemoryResponse confirming the operation
-        
-    Raises:
-        InvalidUserIdError: If user_id is invalid
-        LearningMachineError: If clearing fails
     """
     
-    try:
-        SessionContext._validate_user_id(user_id)
-    except ApiException:
-        raise
+    SessionContext._validate_user_id(user_id)
 
-    container = get_service_container()
-    if not container.is_initialized:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Service not initialized",
-        )
-
-    curator = MemoryCurator(container.agent)
-    curator.clear_user_memory(user_id)
+    agent = get_agent(request)
+    service = MemoryService(agent)
+    await asyncio.wait_for(
+        service.clear_memory(user_id),
+        timeout=_REQUEST_TIMEOUT,
+    )
 
     logger.info(f"Memory cleared for user={user_id}")
     return ClearMemoryResponse(status="cleared", user_id=user_id)

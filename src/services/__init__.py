@@ -1,15 +1,10 @@
 """
 Business logic services for the memory bridge API.
 
-Provides high-level operations for conversation processing, context recall, and memory curation.
+MemoryService is the single entry point for all memory operations
+(process, recall, clear).
 """
 
-from .conversation import ConversationProcessor
-from .recall import ContextRecall
-from .curator import MemoryCurator
+from .memory_service import MemoryService
 
-__all__ = [
-    "ConversationProcessor",
-    "ContextRecall",
-    "MemoryCurator",
-]
+__all__ = ["MemoryService"]

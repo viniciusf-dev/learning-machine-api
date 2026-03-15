@@ -7,11 +7,11 @@ Exposes REST endpoints for the OpenClaw bot to:
 - /memory/{user_id}: Clear user memory
 
 This module coordinates dependency initialization, request routing,
-and error handling. Business logic is delegated to service layer.
+and error handling.
 """
 
 import logging
-from fastapi import FastAPI, status
+from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
 from src.core.logging_config import setup_logging, get_logger
@@ -94,9 +94,9 @@ async def health() -> HealthResponse:
         "This should be called after each user interaction to capture relevant facts."
     ),
 )
-async def process_messages(req: ProcessRequest) -> ProcessResponse:
+async def process_messages(req: ProcessRequest, request: Request) -> ProcessResponse:
     """Process a conversation and extract knowledge for cross-session recall."""
-    return await endpoints.process_messages(req)
+    return await endpoints.process_messages(req, request)
 
 
 @app.post(
@@ -110,9 +110,9 @@ async def process_messages(req: ProcessRequest) -> ProcessResponse:
         "Returns concise briefing notes of facts that would be useful in the new channel."
     ),
 )
-async def recall_context(req: RecallRequest) -> RecallResponse:
+async def recall_context(req: RecallRequest, request: Request) -> RecallResponse:
     """Recall relevant context for a user session."""
-    return await endpoints.recall_context(req)
+    return await endpoints.recall_context(req, request)
 
 
 @app.delete(
@@ -123,23 +123,8 @@ async def recall_context(req: RecallRequest) -> RecallResponse:
     summary="Clear user memory",
     description="Delete all stored memories for a user. This operation is irreversible.",
 )
-async def clear_memory(user_id: str) -> ClearMemoryResponse:
+async def clear_memory(user_id: str, request: Request) -> ClearMemoryResponse:
     """Clear all memories for a user."""
-    return await endpoints.clear_memory(user_id)
+    return await endpoints.clear_memory(user_id, request)
 
 
-@app.on_event("startup")
-async def on_startup() -> None:
-    """Log successful startup."""
-    logger.info(
-        f"Application started: {settings.api_title} v{settings.api_version}"
-    )
-    logger.info(f"Configuration: log_level={settings.log_level}, "
-                f"llm_model={settings.llm_model_id}, "
-                f"learning_mode={settings.learning_mode}")
-
-
-@app.on_event("shutdown")
-async def on_shutdown() -> None:
-    """Log graceful shutdown."""
-    logger.info("Application shutdown")
