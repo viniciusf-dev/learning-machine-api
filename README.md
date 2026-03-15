@@ -34,7 +34,7 @@ User on Slack gets: "• Acme meeting: Thursday (via WhatsApp)"
 9. [Discussion Answers (Part 2)](#9-discussion-answers-part-2)
 10. [Setup & Running](#10-setup--running)
 11. [API Reference](#11-api-reference)
-12. [Interview Preparation](#12-interview-preparation)
+12. [Testing](#12-testing)
 
 ---
 
@@ -225,7 +225,7 @@ Each field has `metadata={"description": "..."}` — Agno passes these descripti
 
 ### EntityMemory (default)
 
-Entity memory uses Agno's built-in `EntityMemory` schema with `entity_memory=True` — no custom dataclass. Channel attribution (`source_channel`, `last_updated_channel`) is handled entirely through the **system prompt** and **extraction prompt**, where the LLM is instructed to embed channel info directly into entity facts (e.g. `"Acme Corp meeting scheduled for Thursday at 2pm (source: whatsapp)"`).
+Entity memory uses Agno's built-in `EntityMemory` schema with `entity_memory=True`, no custom dataclass. Channel attribution (`source_channel`, `last_updated_channel`) is handled entirely through the **system prompt** and **extraction prompt**, where the LLM is instructed to embed channel info directly into entity facts (e.g. `"Acme Corp meeting scheduled for Thursday at 2pm (source: whatsapp)"`).
 
 **Why not a custom schema?** We initially tried `CrossSessionEntityMemory(EntityMemory)` with typed `source_channel` / `last_updated_channel` fields, but Agno's entity memory doesn't propagate `user_id` correctly when using a custom schema — entities were saved with `user_id=NULL`, making them invisible during recall. The default schema works reliably and the LLM embeds channel metadata in the text naturally.
 
@@ -740,3 +740,63 @@ All errors follow a consistent shape:
 | `503` | `service_unavailable` | Services not yet initialized |
 
 ---
+
+## 12. Testing
+
+The project includes a comprehensive **pytest** suite with **164 tests** and **98% code coverage**.
+
+### Running Tests
+
+Tests run **inside the Docker container** (they need access to the app modules).
+
+```bash
+# Build / rebuild (needed after adding or changing test files)
+docker-compose up --build -d
+
+# Run all tests
+docker-compose exec api python -m pytest tests/ -v
+
+# Run with coverage report
+docker-compose exec api python -m pytest tests/ \
+  --cov=src \
+  --cov-report=term-missing \
+  --cov-config=.coveragerc
+
+# Run a specific test file
+docker-compose exec api python -m pytest tests/test_endpoints.py -v
+
+# Run tests matching a keyword
+docker-compose exec api python -m pytest tests/ -k "recall" -v
+```
+
+### Coverage
+
+The project enforces a minimum coverage threshold of **85%** (configured in `.coveragerc`).
+
+Current coverage:
+
+```
+Name                              Stmts   Miss  Cover
+-----------------------------------------------------
+src/api/endpoints.py                 43      0   100%
+src/api/exception_handlers.py        18      0   100%
+src/core/config.py                   22      0   100%
+src/core/errors.py                   45      0   100%
+src/core/prompts.py                  10      0   100%
+src/dependencies.py                  36      0   100%
+src/domain/models.py                 55      2    96%
+src/domain/schemas.py                16      0   100%
+src/services/memory_service.py       59      7    88%
+src/validation/schemas.py            35      0   100%
+-----------------------------------------------------
+TOTAL                               339      9    97%
+```
+
+### Key Testing Patterns
+
+| Pattern | Description |
+|---|---|
+| **Mock Agent** | `conftest.py` provides a `mock_agent` fixture with `FakeLearningMachine` and `FakeCurator` to avoid real LLM calls |
+| **TestClient** | Integration tests use FastAPI's `TestClient` with the mock agent injected into `app.state` |
+| **async** | `pytest.ini` sets `asyncio_mode = auto` — all `async def test_*` functions run automatically |
+| **Markers** | `@pytest.mark.unit` and `@pytest.mark.integration` for selective runs |

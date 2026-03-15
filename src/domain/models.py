@@ -114,12 +114,9 @@ class SessionContext:
             InvalidUserIdError: If user_id is empty, not a string, or too long
         """
         if not user_id or not isinstance(user_id, str):
-            raise InvalidUserIdError(
-                user_id or "null",
-                reason="user_id must be a non-empty string",
-            )
+            raise InvalidUserIdError("user_id must be a non-empty string")
         if len(user_id) > 255:
-            raise InvalidUserIdError(user_id, reason="user_id too long (max 255)")
+            raise InvalidUserIdError("user_id too long (max 255)")
 
     @staticmethod
     def _validate_session_id(session_id: str) -> None:
@@ -135,14 +132,9 @@ class SessionContext:
             InvalidSessionIdError: If session_id is empty, not a string, or too long
         """
         if not session_id or not isinstance(session_id, str):
-            raise InvalidSessionIdError(
-                session_id or "null",
-                reason="session_id must be a non-empty string",
-            )
+            raise InvalidSessionIdError("session_id must be a non-empty string")
         if len(session_id) > settings.max_session_id_length:
-            raise InvalidSessionIdError(
-                session_id, reason="session_id too long"
-            )
+            raise InvalidSessionIdError("session_id too long")
 
     @staticmethod
     def _validate_channel(channel: str) -> None:
@@ -158,4 +150,6 @@ class SessionContext:
             InvalidChannelError: If channel not in {whatsapp, slack, telegram, discord, teams}
         """
         if channel not in VALID_CHANNELS:
-            raise InvalidChannelError(channel, valid_channels=VALID_CHANNELS)
+            raise InvalidChannelError(
+                f"Unsupported channel '{channel}'. Must be one of: {', '.join(sorted(VALID_CHANNELS))}"
+            )
