@@ -124,7 +124,7 @@ class MemoryService:
         logger.info(f"Clearing all memory for user={user_id}")
 
         try:
-            lm = self._agent.get_learning_machine()
+            lm = self._agent.learning_machine
             if lm is None:
                 raise ServiceError("Learning machine not available on agent")
 
@@ -140,24 +140,6 @@ class MemoryService:
         except Exception as e:
             logger.error(f"Failed to clear memory for user={user_id}: {e}", exc_info=True)
             raise ServiceError(f"Failed to clear memory: {e}") from e
-
-    @staticmethod
-    def _extract_content(response) -> Optional[str]:
-        """Extract text content from an agent response, returning None if empty."""
-        if response is None:
-            logger.warning("Agent returned None response")
-            return None
-
-        if not hasattr(response, "content"):
-            logger.warning(f"Agent response missing 'content' attribute: {type(response)}")
-            return None
-
-        content = response.content
-        if not content:
-            return None
-
-        text = str(content).strip()
-        return text if text else None
 
     @staticmethod
     def _raise_agent_error(exc: Exception) -> None:

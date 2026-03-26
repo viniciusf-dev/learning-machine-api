@@ -3,6 +3,7 @@ API request and response schemas.
 """
 
 from src.core.config import settings
+from src.domain.models import Channel
 
 from typing import Optional, List
 
@@ -145,7 +146,7 @@ class ProcessRequest(BaseModel):
     @classmethod
     def validate_channel(cls, v: str) -> str:
         """Validate channel is in supported list."""
-        valid_channels = {"whatsapp", "slack", "telegram", "discord", "teams"}
+        valid_channels = {ch.value for ch in Channel}
         v_lower = v.lower()
         if v_lower not in valid_channels:
             raise ValueError(
@@ -240,9 +241,9 @@ class RecallRequest(BaseModel):
             Normalized (lowercase) channel name
             
         Raises:
-            ValueError: If channel not in {whatsapp, slack, telegram, discord, teams}
+            ValueError: If channel not in Channel enum values
         """
-        valid_channels = {"whatsapp", "slack", "telegram", "discord", "teams"}
+        valid_channels = {ch.value for ch in Channel}
         v_lower = v.lower()
         if v_lower not in valid_channels:
             raise ValueError(

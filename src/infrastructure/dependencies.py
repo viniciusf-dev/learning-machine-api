@@ -24,6 +24,7 @@ from fastapi import FastAPI, Request
 from src.core.config import settings
 from src.domain.schemas import CrossSessionProfile
 from src.infrastructure.prompts import get_system_prompt
+from src.services.memory_service import MemoryService
 
 
 logger = logging.getLogger(__name__)
@@ -34,13 +35,14 @@ class AppState:
     """
     Application state stored in app.state.
 
-    Holds initialized db and agent instances. Stored directly on the
+    Holds initialized db, agent, and service instances. Stored directly on the
     FastAPI app instance to avoid global state and simplify testing —
     each test can create a fresh app with its own AppState.
     """
 
     db: PostgresDb
     agent: Agent
+    service: MemoryService
 
 
 def _build_agent(db: PostgresDb) -> Agent:
@@ -88,7 +90,7 @@ async def lifespan_context(app: FastAPI):
     except Exception as e:
         raise RuntimeError(f"Agent initialization failed: {e}") from e
 
-    app.state.services = AppState(db=db, agent=agent)
+    app.state.services = AppState(db=db, agent=agent, service=MemoryService(agent))
     logger.info(
         f"Application startup complete — model={settings.llm_model_id}, "
         f"learning_mode={settings.learning_mode}"
@@ -115,3 +117,18 @@ def get_agent(request: Request) -> Agent:
     if services is None:
         raise RuntimeError("Services not initialized — lifespan may not have run")
     return services.agent
+
+
+def get_service(request: Request) -> MemoryService:
+    """
+    FastAPI dependency: returns the singleton MemoryService from app.state.
+
+    The service is created once at startup and reused for every request,
+    avoiding unnecessary object churn and allowing safe future state.
+
+    Raises RuntimeError if called before lifespan initialization.
+    """
+    services: AppState = getattr(request.app.state, "services", None)
+    if services is None:
+        raise RuntimeError("Services not initialized — lifespan may not have run")
+    return services.service

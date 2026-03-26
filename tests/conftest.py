@@ -55,16 +55,15 @@ def mock_agent():
     A MagicMock that behaves like agno.agent.Agent.
 
     - agent.run() returns a FakeAgentResponse by default
-    - agent.get_learning_machine() returns a FakeLearningMachine with a curator
+    - agent.learning_machine is a FakeLearningMachine with a curator
     """
     agent = MagicMock()
     agent.run = MagicMock(return_value=FakeAgentResponse("• Meeting with Acme: Thursday 2pm"))
 
     curator = FakeCurator()
     lm = FakeLearningMachine(curator=curator)
-    agent.get_learning_machine = MagicMock(return_value=lm)
 
-    # learning_machine is a property on the real Agent; mock it as a plain attribute
+    # learning_machine is the single access path used throughout the service layer
     agent.learning_machine = lm
 
     return agent
@@ -73,14 +72,19 @@ def mock_agent():
 @pytest.fixture
 def app(mock_agent):
     """
-    A fully wired FastAPI app with the mock agent injected into app.state.
+    A fully wired FastAPI app with the mock agent and service injected into app.state.
 
     Bypasses lifespan_context entirely — no database, no LLM.
     """
     from src.infrastructure.dependencies import AppState
+    from src.services.memory_service import MemoryService
     from src.main import app as real_app
 
-    real_app.state.services = AppState(db=MagicMock(), agent=mock_agent)
+    real_app.state.services = AppState(
+        db=MagicMock(),
+        agent=mock_agent,
+        service=MemoryService(mock_agent),
+    )
     return real_app
 
 

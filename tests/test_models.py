@@ -6,6 +6,7 @@ Covers: Channel enum, Message validation/formatting, SessionContext validation.
 
 import pytest
 
+from src.core.config import settings
 from src.core.errors import BadRequestError
 from src.domain.models import Channel, VALID_CHANNELS, Message, SessionContext
 
@@ -63,10 +64,18 @@ class TestMessage:
             Message(role=123, content="hello")
 
     def test_content_exceeds_max_length(self):
-        """Content longer than settings.max_message_length should raise."""
-        long_content = "x" * 100_001  # default max is 10_000
+        """Content longer than settings.max_message_length should raise BadRequestError."""
+        long_content = "x" * (settings.max_message_length + 1)
         with pytest.raises(BadRequestError):
             Message(role="user", content=long_content)
+
+    def test_content_exceeds_max_length_error_is_string(self):
+        """MessageTooLongError must have a descriptive string message, not raw integers."""
+        long_content = "x" * (settings.max_message_length + 1)
+        with pytest.raises(BadRequestError) as exc_info:
+            Message(role="user", content=long_content)
+        assert isinstance(exc_info.value.message, str)
+        assert str(settings.max_message_length) in exc_info.value.message
 
 
 # ---------------------------------------------------------------------------
@@ -122,7 +131,7 @@ class TestSessionContext:
 
 
 class TestSessionContextValidateUserId:
-    """Test the static _validate_user_id method directly (used by DELETE /memory)."""
+    """Test the static _validate_user_id method directly (used by SessionContext.__init__)."""
 
     def test_valid(self):
         SessionContext._validate_user_id("user_123")  # should not raise

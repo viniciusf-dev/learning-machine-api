@@ -1,8 +1,8 @@
 """
 Tests for src/services/memory_service.py
 
-Covers: process_messages, recall_context, clear_memory, _extract_content,
-        _raise_agent_error, NO_MEMORY sentinel.
+Covers: process_messages, recall_context, clear_memory,
+        _raise_agent_error.
 """
 
 import pytest
@@ -12,7 +12,7 @@ from src.core.errors import BadRequestError, ServiceError, LlmError
 from src.domain.models import Message, SessionContext
 from src.services.memory_service import MemoryService
 
-from tests.conftest import FakeAgentResponse, FakeLearningMachine, FakeCurator
+from tests.conftest import FakeLearningMachine, FakeCurator
 
 
 # ---------------------------------------------------------------------------
@@ -191,12 +191,13 @@ class TestClearMemory:
         svc = MemoryService(mock_agent)
         await svc.clear_memory("user_1")
 
-        lm = mock_agent.get_learning_machine()
-        lm.curator.prune.assert_called_once_with(user_id="user_1", max_age_days=0)
+        mock_agent.learning_machine.curator.prune.assert_called_once_with(
+            user_id="user_1", max_age_days=0
+        )
 
     @pytest.mark.asyncio
     async def test_no_learning_machine_raises(self, mock_agent):
-        mock_agent.get_learning_machine.return_value = None
+        mock_agent.learning_machine = None
         svc = MemoryService(mock_agent)
 
         with pytest.raises(ServiceError) as exc_info:
@@ -205,8 +206,8 @@ class TestClearMemory:
 
     @pytest.mark.asyncio
     async def test_no_curator_raises(self, mock_agent):
-        lm = FakeLearningMachine(curator=None)
-        mock_agent.get_learning_machine.return_value = lm
+        from tests.conftest import FakeLearningMachine
+        mock_agent.learning_machine = FakeLearningMachine(curator=None)
         svc = MemoryService(mock_agent)
 
         with pytest.raises(ServiceError) as exc_info:
@@ -215,41 +216,12 @@ class TestClearMemory:
 
     @pytest.mark.asyncio
     async def test_prune_failure_raises_service_error(self, mock_agent):
-        lm = mock_agent.get_learning_machine()
-        lm.curator.prune.side_effect = Exception("disk full")
+        mock_agent.learning_machine.curator.prune.side_effect = Exception("disk full")
         svc = MemoryService(mock_agent)
 
         with pytest.raises(ServiceError) as exc_info:
             await svc.clear_memory("user_1")
         assert "Failed to clear memory" in exc_info.value.internal_detail
-
-
-# ---------------------------------------------------------------------------
-# _extract_content (static method)
-# ---------------------------------------------------------------------------
-
-class TestExtractContent:
-    def test_normal_response(self):
-        resp = FakeAgentResponse("hello world")
-        assert MemoryService._extract_content(resp) == "hello world"
-
-    def test_strips_whitespace(self):
-        resp = FakeAgentResponse("  hello  ")
-        assert MemoryService._extract_content(resp) == "hello"
-
-    def test_none_response(self):
-        assert MemoryService._extract_content(None) is None
-
-    def test_none_content(self):
-        resp = FakeAgentResponse(None)
-        assert MemoryService._extract_content(resp) is None
-
-    def test_empty_content(self):
-        resp = FakeAgentResponse("")
-        assert MemoryService._extract_content(resp) is None
-
-    def test_no_content_attribute(self):
-        assert MemoryService._extract_content("plain string") is None
 
 
 # ---------------------------------------------------------------------------

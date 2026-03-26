@@ -65,7 +65,10 @@ class Message:
             raise ValidationError("Message content must be a non-empty string")
 
         if len(content) > settings.max_message_length:
-            raise MessageTooLongError(settings.max_message_length, len(content))
+            raise MessageTooLongError(
+                f"Message content exceeds maximum length of {settings.max_message_length} "
+                f"characters (got {len(content)})"
+            )
 
     def __str__(self) -> str:
         """

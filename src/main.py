@@ -11,7 +11,7 @@ and error handling.
 """
 
 import logging
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Path, Request, status
 from fastapi.responses import JSONResponse
 
 from src.core.logging_config import setup_logging, get_logger
@@ -123,7 +123,16 @@ async def recall_context(req: RecallRequest, request: Request) -> RecallResponse
     summary="Clear user memory",
     description="Delete all stored memories for a user. This operation is irreversible.",
 )
-async def clear_memory(user_id: str, request: Request) -> ClearMemoryResponse:
+async def clear_memory(
+    user_id: str = Path(
+        ...,
+        min_length=1,
+        max_length=255,
+        pattern=r"^\S+$",
+        description="User identifier",
+    ),
+    request: Request = None,
+) -> ClearMemoryResponse:
     """Clear all memories for a user."""
     return await endpoints.clear_memory(user_id, request)
 

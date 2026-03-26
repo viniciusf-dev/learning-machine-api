@@ -10,23 +10,27 @@ from dataclasses import dataclass
 
 from fastapi import FastAPI
 
-from src.infrastructure.dependencies import AppState, get_agent
+from src.infrastructure.dependencies import AppState, get_agent, get_service
+from src.services.memory_service import MemoryService
 
 
 class TestAppState:
-    def test_stores_db_and_agent(self):
+    def test_stores_db_agent_and_service(self):
         db = MagicMock()
         agent = MagicMock()
-        state = AppState(db=db, agent=agent)
+        service = MagicMock()
+        state = AppState(db=db, agent=agent, service=service)
         assert state.db is db
         assert state.agent is agent
+        assert state.service is service
 
 
 class TestGetAgent:
     def test_returns_agent_from_state(self):
         app = FastAPI()
         mock_agent = MagicMock()
-        app.state.services = AppState(db=MagicMock(), agent=mock_agent)
+        mock_service = MagicMock()
+        app.state.services = AppState(db=MagicMock(), agent=mock_agent, service=mock_service)
 
         request = MagicMock()
         request.app = app
@@ -42,6 +46,28 @@ class TestGetAgent:
 
         with pytest.raises(RuntimeError, match="Services not initialized"):
             get_agent(request)
+
+
+class TestGetService:
+    def test_returns_service_from_state(self):
+        app = FastAPI()
+        mock_agent = MagicMock()
+        mock_service = MemoryService(mock_agent)
+        app.state.services = AppState(db=MagicMock(), agent=mock_agent, service=mock_service)
+
+        request = MagicMock()
+        request.app = app
+
+        result = get_service(request)
+        assert result is mock_service
+
+    def test_raises_when_services_not_set(self):
+        app = FastAPI()
+        request = MagicMock()
+        request.app = app
+
+        with pytest.raises(RuntimeError, match="Services not initialized"):
+            get_service(request)
 
 
 class TestLifespanContext:
@@ -63,6 +89,7 @@ class TestLifespanContext:
                 assert hasattr(app.state, "services")
                 assert app.state.services is not None
                 assert app.state.services.db is mock_db
+                assert app.state.services.service is not None
 
     @pytest.mark.asyncio
     async def test_lifespan_db_failure_raises_runtime_error(self):

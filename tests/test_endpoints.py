@@ -160,25 +160,36 @@ class TestClearMemoryEndpoint:
 
     def test_prune_called_correctly(self, client, mock_agent):
         client.delete("/memory/user_abc")
-        lm = mock_agent.get_learning_machine()
-        lm.curator.prune.assert_called_with(user_id="user_abc", max_age_days=0)
+        mock_agent.learning_machine.curator.prune.assert_called_with(
+            user_id="user_abc", max_age_days=0
+        )
 
     def test_no_learning_machine_returns_500(self, client, mock_agent):
-        mock_agent.get_learning_machine.return_value = None
+        mock_agent.learning_machine = None
         resp = client.delete("/memory/user_123")
         assert resp.status_code == 500
 
     def test_no_curator_returns_500(self, client, mock_agent):
-        lm = FakeLearningMachine(curator=None)
-        mock_agent.get_learning_machine.return_value = lm
+        mock_agent.learning_machine = FakeLearningMachine(curator=None)
         resp = client.delete("/memory/user_123")
         assert resp.status_code == 500
 
     def test_prune_failure_returns_500(self, client, mock_agent):
-        lm = mock_agent.get_learning_machine()
-        lm.curator.prune.side_effect = Exception("disk full")
+        mock_agent.learning_machine.curator.prune.side_effect = Exception("disk full")
         resp = client.delete("/memory/user_123")
         assert resp.status_code == 500
+
+    def test_empty_user_id_returns_422(self, client):
+        """Empty path segment is rejected by FastAPI Path min_length constraint."""
+        # An empty string in the path doesn't match the route at all — FastAPI 422
+        resp = client.delete("/memory/ ")
+        assert resp.status_code in (404, 422)
+
+    def test_user_id_too_long_returns_422(self, client):
+        """Path user_id longer than 255 chars is rejected by Path max_length."""
+        long_id = "x" * 256
+        resp = client.delete(f"/memory/{long_id}")
+        assert resp.status_code == 422
 
 
 # ---------------------------------------------------------------------------
